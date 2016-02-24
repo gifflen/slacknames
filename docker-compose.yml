@@ -1,0 +1,4 @@
+slacknames:
+  build: .
+  environment:
+    SLACK_TOKEN:
