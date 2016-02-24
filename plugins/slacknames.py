@@ -236,7 +236,7 @@ class Game(object):
                         # TODO: implement game over
                         return
 
-                    elif guess_type == 'brown':
+                    elif guess_type == '':
                         self._message_slack(
                             "You've selected a bystander. Changing Teams")
                         self._change_teams()
@@ -303,9 +303,15 @@ class Game(object):
         # Iterate over the words and draw the text on the grid
         for i in range(GRID_SIZE):
             for j in range(GRID_SIZE):
+                TEXT_FILL = None
                 x = (GRID_UNIT * (i + 1)) - GRID_UNIT + GRID_TEXT_OFFSET
                 y = (GRID_UNIT * (j + 1)) - GRID_UNIT + GRID_TEXT_OFFSET
                 text = self.play_area[str(i + 1)][ALPHABET[j]]
+
+                if text.lower() == 'red':
+                    TEXT_FILL = (255,0,0,255)
+                if text.lower() == 'blue':
+                    TEXT_FILL = (0,0,255,255)
 
                 draw.multiline_text((x,y), text, TEXT_FILL, TEXT_FONT, TEXT_ANCHOR,
                                     TEXT_SPACING, TEXT_ALIGN)
@@ -373,10 +379,16 @@ class Game(object):
         # Iterate over the words and draw the text on the grid
         for i in range(GRID_SIZE):
             for j in range(GRID_SIZE):
+                TEXT_FILL = None
                 x = (GRID_UNIT * (i + 1)) - GRID_UNIT + GRID_TEXT_OFFSET
                 y = (GRID_UNIT * (j + 1)) - GRID_UNIT + GRID_TEXT_OFFSET
                 text = self.spymaster_card.grid[str(i + 1)][ALPHABET[j]]
 
+
+                if text.lower() == 'red':
+                    TEXT_FILL = (255,0,0,255)
+                if text.lower() == 'blue':
+                    TEXT_FILL = (0,0,255,255)
                 draw.multiline_text((x,y), text, TEXT_FILL, TEXT_FONT, TEXT_ANCHOR,
                                     TEXT_SPACING, TEXT_ALIGN)
 
