@@ -1,13 +1,11 @@
-import time
+import logging
+import os
 import random
-import boto3
-import uuid
+from sets import Set
 import string
 
-import logging
-from sets import Set
+import boto3
 from PIL import Image, ImageFont, ImageDraw
-
 
 crontable = []
 outputs = []
@@ -19,6 +17,64 @@ log.setLevel(logging.DEBUG)
 
 s3 = boto3.resource('s3')
 
+BUCKET_NAME = 'slacknames'
+
+IMAGE_SIZE = (400, 400)
+IMAGE_BG_COLOR = "black"
+IMAGE_TYPE = "RGB"
+
+TEXT_FONT = ImageFont.load_default()
+TEXT_ALIGN = 'center'  # Doesn't work but documentation says it should...
+TEXT_ANCHOR = None
+TEXT_SPACING = 0
+
+# Other various grid variables
+GRID_SIZE = 5
+GRID_UNIT = IMAGE_SIZE[0] / GRID_SIZE
+GRID_TEXT_OFFSET = GRID_UNIT * .25
+ALPHABET = ("A", "B", "C", "D", "E")
+
+
+def draw_image(grid):
+    # Create an image
+    image = Image.new(IMAGE_TYPE, IMAGE_SIZE, IMAGE_BG_COLOR)
+
+    # Create an draw object to use when writing text
+    draw = ImageDraw.Draw(image)
+
+    # Iterate over the words and draw the text on the grid
+    for i in range(GRID_SIZE):
+        for j in range(GRID_SIZE):
+            text_fill = None
+            x = (GRID_UNIT * (i + 1)) - GRID_UNIT + GRID_TEXT_OFFSET
+            y = (GRID_UNIT * (j + 1)) - GRID_UNIT + GRID_TEXT_OFFSET
+            text = grid[str(i + 1)][ALPHABET[j]]
+
+            if text.lower() == 'red':
+                text_fill = (255, 0, 0, 255)
+            if text.lower() == 'blue':
+                text_fill = (0, 0, 255, 255)
+
+            draw.multiline_text((x, y), text, text_fill, TEXT_FONT,
+                                TEXT_ANCHOR,
+                                TEXT_SPACING, TEXT_ALIGN)
+
+    # Done with `draw` object
+    del draw
+
+    name = ''.join(random.SystemRandom().choice(
+        string.ascii_uppercase + string.digits) for _ in range(15))
+    name += '.jpg'
+    # Return the image
+    image.save(name, formage='JPEG')
+    s3.Bucket(BUCKET_NAME).upload_file(name, name,
+                                       ExtraArgs={
+                                           'ACL': 'public-read',
+                                           'ContentType': 'image/jpeg'})
+    os.remove(name)
+    return name
+
+
 def get_channel_name(data):
     return data['channel']
 
@@ -27,7 +83,6 @@ def get_username(data):
     # TODO translate to actual username
     user_id = data['user']
     return user_id
-
 
 
 class SpyMasterCard(object):
@@ -42,7 +97,6 @@ class SpyMasterCard(object):
         self._choose_player_orders()
         self._populate_grid()
         print self.grid
-        #s3.Bucket('slacknames').upload_file('test', 'test.jpg')
 
     def _choose_player_orders(self):
         teams = list(TEAMS)
@@ -69,7 +123,7 @@ class SpyMasterCard(object):
     def _fill_bystanders(self):
         for key in self.grid.keys():
             for sub_key in self.grid[key].keys():
-                if not self.grid[key][sub_key]:
+                if self.grid[key][sub_key] == '':
                     self.grid[key][sub_key] = 'brown'
 
     def _populate_grid(self):
@@ -208,7 +262,8 @@ class Game(object):
 
     def guess(self, guess, player):
         if not self.clue_given:
-            self._message_slack("Please wait for your spymaster to give a clue")
+            self._message_slack(
+                "Please wait for your spymaster to give a clue")
             return
         # TODO: check player against current team
         # TODO: check reminaing guesses
@@ -255,7 +310,9 @@ class Game(object):
                         self._message_slack(
                             "You've selected an agent! Congrats!")
                         self.scores[self.current_team] += 1
-                        self._message_slack("{} has {} guesses remaining.".format(self.current_team, self.remaining_guesses))
+                        self._message_slack(
+                            "{} has {} guesses remaining.".format(
+                                self.current_team, self.remaining_guesses))
                         self.print_game()
                         return
 
@@ -267,68 +324,16 @@ class Game(object):
                         return
 
                     self._message_slack(
-                        "{} Guesses remaining. Please select another agent or !pass".format(
-                            self.remaining_guesses))
+                        "{} Guesses remaining. Please select another agent "
+                        "or !pass".format(self.remaining_guesses))
                     return
         self._message_slack(
             "\"{}\" is not a valid clue. Try again".format(guess))
 
     def print_game(self):
-        #self._message_slack(str(self.play_area))
-
-        # Define the image sizes
-        IMAGE_SIZE = (400,400)
-        IMAGE_BG_COLOR = "black"
-        IMAGE_TYPE = "RGB"
-
-        # Define the text defaults
-        TEXT_FILL = None
-        TEXT_FONT = ImageFont.load_default()
-        TEXT_ALIGN = 'center' # Doesn't work but documentation says it should...
-        TEXT_ANCHOR = None
-        TEXT_SPACING = 0
-
-        # Other various grid variables
-        GRID_SIZE = 5
-        GRID_UNIT = IMAGE_SIZE[0] / GRID_SIZE
-        GRID_TEXT_OFFSET = GRID_UNIT * .25
-        ALPHABET = ("A", "B", "C", "D", "E")
-
-        # Create an image
-        image = Image.new(IMAGE_TYPE, IMAGE_SIZE, IMAGE_BG_COLOR)
-
-        # Create an draw object to use when writing text
-        draw = ImageDraw.Draw(image)
-
-        # Iterate over the words and draw the text on the grid
-        for i in range(GRID_SIZE):
-            for j in range(GRID_SIZE):
-                TEXT_FILL = None
-                x = (GRID_UNIT * (i + 1)) - GRID_UNIT + GRID_TEXT_OFFSET
-                y = (GRID_UNIT * (j + 1)) - GRID_UNIT + GRID_TEXT_OFFSET
-                text = self.play_area[str(i + 1)][ALPHABET[j]]
-
-                if text.lower() == 'red':
-                    TEXT_FILL = (255,0,0,255)
-                if text.lower() == 'blue':
-                    TEXT_FILL = (0,0,255,255)
-
-                draw.multiline_text((x,y), text, TEXT_FILL, TEXT_FONT, TEXT_ANCHOR,
-                                    TEXT_SPACING, TEXT_ALIGN)
-
-        # Done with `draw` object
-        del draw
-
-        name = ''.join(random.SystemRandom().choice(string.ascii_uppercase + string.digits) for _ in range(15))
-        name = name + '.jpg'
-        # Return the image
-        image.save(name, formage='JPEG')
-        s3.Bucket('slacknames').upload_file(name, name, ExtraArgs={'ACL': 'public-read','ContentType': 'image/jpeg'})
-        self._message_slack('https://s3.amazonaws.com/slacknames/{}'.format(name))
-
-        #image.save('{}.jpg'.format(self.channel), formage='JPEG')
-        #s3.Bucket('slacknames').upload_file('{}.jpg'.format(self.channel), '{}.jpg'.format(self.channel), ExtraArgs={'ACL': 'public-read','ContentType': 'image/jpeg'})
-        #self._message_slack('https://s3.amazonaws.com/slacknames/{}.jpg'.format(self.channel))
+        name = draw_image(self.play_area)
+        self._message_slack(
+            'https://s3.amazonaws.com/slacknames/{}'.format(name))
 
     def score(self):
         self._message_slack(str(self.scores))
@@ -346,62 +351,16 @@ class Game(object):
 
         self.clue_given = True
         self.remaining_guesses = int(count) + 1
-        self._message_slack("{} have {} guesses reminaing.".format(self.current_team, self.remaining_guesses))
+        self._message_slack(
+            "{} have {} guesses reminaing.".format(self.current_team,
+                                                   self.remaining_guesses))
 
     def spymaster(self):
         log.debug("Attempting to send spymaster his card")
-        #outputs.append(['U0E5XLBRP', str(self.spymaster_card.grid)])
 
-        # Define the image sizes
-        IMAGE_SIZE = (400,400)
-        IMAGE_BG_COLOR = "black"
-        IMAGE_TYPE = "RGB"
-
-        # Define the text defaults
-        TEXT_FILL = None
-        TEXT_FONT = ImageFont.load_default()
-        TEXT_ALIGN = 'center' # Doesn't work but documentation says it should...
-        TEXT_ANCHOR = None
-        TEXT_SPACING = 0
-
-        # Other various grid variables
-        GRID_SIZE = 5
-        GRID_UNIT = IMAGE_SIZE[0] / GRID_SIZE
-        GRID_TEXT_OFFSET = GRID_UNIT * .25
-        ALPHABET = ("A", "B", "C", "D", "E")
-
-        # Create an image
-        image = Image.new(IMAGE_TYPE, IMAGE_SIZE, IMAGE_BG_COLOR)
-
-        # Create an draw object to use when writing text
-        draw = ImageDraw.Draw(image)
-
-        # Iterate over the words and draw the text on the grid
-        for i in range(GRID_SIZE):
-            for j in range(GRID_SIZE):
-                TEXT_FILL = None
-                x = (GRID_UNIT * (i + 1)) - GRID_UNIT + GRID_TEXT_OFFSET
-                y = (GRID_UNIT * (j + 1)) - GRID_UNIT + GRID_TEXT_OFFSET
-                text = self.spymaster_card.grid[str(i + 1)][ALPHABET[j]]
-
-
-                if text.lower() == 'red':
-                    TEXT_FILL = (255,0,0,255)
-                if text.lower() == 'blue':
-                    TEXT_FILL = (0,0,255,255)
-                draw.multiline_text((x,y), text, TEXT_FILL, TEXT_FONT, TEXT_ANCHOR,
-                                    TEXT_SPACING, TEXT_ALIGN)
-
-        # Done with `draw` object
-        del draw
-
-        # Return the image
-        name = ''.join(random.SystemRandom().choice(string.ascii_uppercase + string.digits) for _ in range(15))
-        name = name + '.jpg'
-        # Return the image
-        image.save(name, formage='JPEG')
-        s3.Bucket('slacknames').upload_file(name, name, ExtraArgs={'ACL': 'public-read','ContentType': 'image/jpeg'})
-        outputs.append(['U0E5XLBRP', 'https://s3.amazonaws.com/slacknames/{}'.format(name)])
+        name = draw_image(self.spymaster_card.grid)
+        outputs.append(['U0E5XLBRP',
+                        'https://s3.amazonaws.com/slacknames/{}'.format(name)])
 
 
 class Games(object):
@@ -530,10 +489,14 @@ def process_message(data):
                 GAMES.print_game(data)
 
             if command == '!help':
-                outputs.append([data['channel'], "!newgame !joingame !startgame !endgame !listplayers !guess !clue !pass !score !print !help"])
+                outputs.append([data['channel'],
+                                "!newgame !joingame !startgame !endgame "
+                                "!listplayers !guess !clue !pass !score "
+                                "!print !help"])
 
             if command == '!spymaster':
                 GAMES.print_spymaster_card(data)
+
 
 WORDS = ['AFRICA',
          'AGENT',
