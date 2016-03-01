@@ -1,3 +1,5 @@
+import copy
+import json
 import logging
 import os
 import random
@@ -6,6 +8,8 @@ import string
 
 import boto3
 from PIL import Image, ImageFont, ImageDraw
+
+CLIENT = None
 
 crontable = []
 outputs = []
@@ -17,6 +21,7 @@ log.setLevel(logging.DEBUG)
 
 s3 = boto3.resource('s3')
 
+# TODO: Make the bucket name a config value
 BUCKET_NAME = 'slacknames'
 
 IMAGE_SIZE = (400, 400)
@@ -72,22 +77,22 @@ def draw_image(grid):
                                            'ACL': 'public-read',
                                            'ContentType': 'image/jpeg'})
     os.remove(name)
-    return name
+    return 'https://s3.amazonaws.com/{}/{}'.format(BUCKET_NAME, name)
 
 
 def get_channel_name(data):
     return data['channel']
 
 
-def get_username(data):
-    # TODO translate to actual username
+def extract_user_id(data):
     user_id = data['user']
     return user_id
 
 
 class SpyMasterCard(object):
-    def __init__(self):
-        self.first_team = TEAMS[0]
+    def __init__(self, teams):
+        self.teams = teams
+        self.first_team = teams[0]
         self.grid = {'1': {'A': '', 'B': '', 'C': '', 'D': '', 'E': ''},
                      '2': {'A': '', 'B': '', 'C': '', 'D': '', 'E': ''},
                      '3': {'A': '', 'B': '', 'C': '', 'D': '', 'E': ''},
@@ -99,10 +104,10 @@ class SpyMasterCard(object):
         print self.grid
 
     def _choose_player_orders(self):
-        teams = list(TEAMS)
-        first_player = random.choice(teams)
-        teams.remove(first_player)
-        self.first_team = first_player
+        teams = copy.copy(self.teams)
+        first_team = random.choice(teams)
+        teams.remove(first_team)
+        self.first_team = first_team
         self.second_team = teams[0]
 
     # This is ugly but works.
@@ -139,17 +144,87 @@ class SpyMasterCard(object):
         return self.grid[row][column]
 
 
+class User(object):
+
+    def __init__(self, slack_id):
+        self.slack_id = slack_id
+        self.name = ''
+        self.dm_channel = ''
+        self._info = {}
+        self._refresh_info()
+        self._get_name()
+        self._get_channel()
+
+    def __repr__(self):
+        return self.name
+
+    def _refresh_info(self):
+        response = json.loads(CLIENT.api_call("users.info", user=self.slack_id))
+        self._info = response['user']
+
+    def _get_name(self):
+        if 'name' in self._info:
+            self.name = self._info['name']
+        else:
+            log.warn('No name found in slack response')
+            self.name = ''
+
+    def _get_channel(self):
+        pass
+
+    def _create_dm_channel(self):
+        pass
+
+    def dm_user(self, message):
+        outputs.append([self.slack_id, message])
+
+
+class Team(object):
+
+    def __init__(self, color):
+        self.players = Set()
+        self.color = color
+        self.spymaster = None
+        self.score = 0
+        self.clues = []
+
+    def add_clue(self, clue):
+        self.clues.append(clue)
+        return self.clues
+
+    def add_player(self, player):
+        self.players.add(player)
+        return self.players
+
+    def add_score(self):
+        self.score += 1
+        return self.score
+
+    def increase_score(self):
+        self.score += 1
+        return self.score
+
+    def select_spymaster(self):
+        self.spymaster(random.choice(list(self.players)))
+        return self.spymaster
+
+    def print_players(self):
+        return "{} Team Spymaster: {} Players: {}".format(self.color,
+                                                          self.spymaster,
+                                                          self.players)
+
+    def print_score(self):
+        return "{} Team Score: {}".format(self.color, str(self.score))
+
+
 class Game(object):
     def __init__(self, channel):
-        self.players = Set()
-        self.blue_spymaster = ''
-        self.red_spymaster = ''
+        #self.players = Set()
+        self.players = []
 
-        self.blue_team = Set()
-        self.red_team = Set()
-        self.teams = {'Red': [], 'Blue': []}
-        self.scores = {'Red': 0, 'Blue': 0}
-        self.clues = {'Red': [], 'Blue': []}
+        self.blue_team = Team('Blue')
+        self.red_team = Team('Red')
+        self.teams = [self.blue_team, self.red_team]
         self.channel = channel
         self.play_area = {'1': {'A': '', 'B': '', 'C': '', 'D': '', 'E': ''},
                           '2': {'A': '', 'B': '', 'C': '', 'D': '', 'E': ''},
@@ -158,8 +233,8 @@ class Game(object):
                           '5': {'A': '', 'B': '', 'C': '', 'D': '', 'E': ''}}
         self.started = False
         self.spymaster_card = None
-        self.current_team = 'Red'
-        self.opposing_team = 'Blue'
+        self.current_team = self.red_team
+        self.opposing_team = self.blue_team
         self.remaining_guesses = 0
         self.clue_given = False
 
@@ -180,33 +255,32 @@ class Game(object):
 
     def _select_teams(self):
         log.debug('Selecting teams')
-        players = list(self.players.copy())
+        #players = list(self.players.copy())
+        players = copy.copy(self.players)
         while len(players) > 0:
             choice = random.choice(players)
             print choice
             players.remove(choice)
-            if len(self.blue_team) > len(self.red_team):
-                self.red_team.add(choice)
+            if len(self.blue_team.players) > len(self.red_team.players):
+                self.red_team.add_player(choice)
             else:
-                self.blue_team.add(choice)
+                self.blue_team.add_player(choice)
         print "Blue team", self.blue_team
         print "Red Team", self.red_team
 
     def _select_spymasters(self):
         log.debug('Selecting spymasters')
-        log.debug(self.red_team)
-        log.debug(self.blue_team)
-        self.red_spymaster = random.choice(list(self.red_team.copy()))
-        self.blue_spymaster = random.choice(list(self.blue_team.copy()))
+        for team in self.teams:
+            team.select_spymaster()
 
     def join_game(self, player):
-        self.players.add(player)
+        #self.players.add(player)
+        self.players.append(player)
 
-    def list_players(self):
-        self._message_slack(
-            "Players: {0} Blue Team: {1} Red Team: {2}".format(self.players,
-                                                               self.blue_team,
-                                                               self.red_team))
+    def print_players(self):
+        self._message_slack("Players: {}".format(self.players))
+        for team in self.teams:
+            self._message_slack(team.print_players())
 
     def start_game(self):
         if self.started:
@@ -218,24 +292,18 @@ class Game(object):
             self._init_play_area()
             self._select_teams()
             self._select_spymasters()
-            self.spymaster_card = SpyMasterCard()
+            self.spymaster_card = SpyMasterCard(self.teams)
             self.started = True
             self.current_team = self.spymaster_card.first_team
             self.clue_given = False
 
-            self._message_slack("Game Started")
-            self._message_slack(
-                "RED TEAM SPYMASTER: {}".format(self.red_spymaster))
-            self._message_slack("RED TEAM: {}".format(self.red_team))
-            self._message_slack(
-                "BLUE TEAM SPYMASTER: {}".format(self.blue_spymaster))
-            self._message_slack("BLUE TEAM: {}".format(self.blue_team))
-
+            self._message_slack("Game Started!")
+            self.print_players()
             self.print_game()
 
             self._message_slack(
-                'It is {}\'s turn. Spymaster please submit a !clue'.format(
-                    self.current_team))
+                'It is {}\'s turn. @{} please submit a !clue'.format(
+                    self.current_team, self.current_team.spymaster))
             self.spymaster()
 
         else:
@@ -243,24 +311,25 @@ class Game(object):
             print "Not enough players"
 
     def fake_players(self):
-        self.join_game('Bill')
-        self.join_game('Bob')
-        self.join_game('Jill')
+        self.join_game('U0C2J3MQV')
+        self.join_game('U0C2J3MQV')
+        self.join_game('U0C2J3MQV')
 
     def _change_teams(self):
         self.remaining_guesses = 0
         self.clue_given = False
-        current = self.current_team
-        opposing = self.opposing_team
-        self.current_team = opposing
-        self.opposing_team = current
-        self._message_slack("Current team is {}".format(self.current_team))
+
+        # Swap teams
+        self.current_team, self.opposing_team = \
+            self.opposing_team, self.current_team
+
+        self._message_slack("Current team is {}".format(self.current_team.color))
 
     def _check_team(self, player):
         # if player in self.current_team
         pass
 
-    def guess(self, guess, player):
+    def guess(self, guess, user_id):
         if not self.clue_given:
             self._message_slack(
                 "Please wait for your spymaster to give a clue")
@@ -285,7 +354,6 @@ class Game(object):
                     self.play_area[row][column] = guess_type
                     logging.debug('Guess type: {}'.format(guess_type))
                     if guess_type == 'kill':
-                        # TODO: Determine winner
                         self._message_slack(
                             "You've selected the kill word. GAME OVER")
                         # TODO: implement game over
@@ -299,7 +367,7 @@ class Game(object):
                         return
 
                     elif guess_type != self.current_team:
-                        self.scores[self.opposing_team] += 1
+                        self.opposing_team.add_score()
                         self._message_slack(
                             "You've selected a opposing agent. Changing Teams")
                         self._change_teams()
@@ -309,7 +377,7 @@ class Game(object):
                     elif guess_type == self.current_team:
                         self._message_slack(
                             "You've selected an agent! Congrats!")
-                        self.scores[self.current_team] += 1
+                        self.current_team.add_score()
                         self._message_slack(
                             "{} has {} guesses remaining.".format(
                                 self.current_team, self.remaining_guesses))
@@ -331,36 +399,37 @@ class Game(object):
             "\"{}\" is not a valid clue. Try again".format(guess))
 
     def print_game(self):
-        name = draw_image(self.play_area)
-        self._message_slack(
-            'https://s3.amazonaws.com/slacknames/{}'.format(name))
+        self._message_slack(draw_image(self.play_area))
 
-    def score(self):
-        self._message_slack(str(self.scores))
+    def print_scores(self):
+        for team in self.teams:
+            self._message_slack(team.print_score())
 
     def pass_team(self):
         self._message_slack("Changing teams")
         self._change_teams()
 
+    # TODO: Need to determine who the clue is coming from
     def clue(self, clue, count):
         # todo: check spymaster
         # todo: check turn
         if self.clue_given:
             self._message_slack("Clue has already been submitted this round")
             return
-
+        self.current_team.add_clue(clue)
         self.clue_given = True
         self.remaining_guesses = int(count) + 1
         self._message_slack(
-            "{} have {} guesses reminaing.".format(self.current_team,
+            "{} have {} guesses reminding.".format(self.current_team.color,
                                                    self.remaining_guesses))
 
     def spymaster(self):
         log.debug("Attempting to send spymaster his card")
 
-        name = draw_image(self.spymaster_card.grid)
-        outputs.append(['U0E5XLBRP',
-                        'https://s3.amazonaws.com/slacknames/{}'.format(name)])
+        spymaster_card_link = draw_image(self.spymaster_card.grid)
+
+        for team in self.teams:
+            team.spymaster.dm_user(spymaster_card_link)
 
 
 class Games(object):
@@ -388,8 +457,8 @@ class Games(object):
         log.debug("Joining a game")
         outputs.append([data['channel'], "Adding you to the game"])
         game = self.find_game_by_name(get_channel_name(data))
-        player = get_username(data)
-        game.join_game(player)
+        user = User(extract_user_id(data))
+        game.join_game(user)
 
     def start_game(self, data):
         log.debug("Starting a game")
@@ -407,13 +476,12 @@ class Games(object):
 
     def list_players(self, data):
         game = self.find_game_by_name(get_channel_name(data))
-        game.list_players()
+        game.print_players()
 
     def guess(self, data, guess):
         log.debug("Processing guess for {}".format(guess))
         game = self.find_game_by_name(get_channel_name(data))
-        player = get_username(data)
-        game.guess(guess, player)
+        game.guess(guess, extract_user_id(data))
 
     def print_game(self, data):
         game = self.find_game_by_name(get_channel_name(data))
@@ -421,7 +489,7 @@ class Games(object):
 
     def score(self, data):
         game = self.find_game_by_name(get_channel_name(data))
-        game.score()
+        game.print_scores()
 
     def pass_team(self, data):
         game = self.find_game_by_name(get_channel_name(data))
@@ -442,6 +510,9 @@ GAMES = Games()
 
 def process_message(data):
     log.debug(data)
+    if 'client' in data:
+        global CLIENT
+        CLIENT = data['client']
     if 'text' in data:
         if data['text'].startswith('!'):
             player_input = data['text'].split(' ')
