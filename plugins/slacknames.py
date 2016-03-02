@@ -593,7 +593,7 @@ def process_message(data):
                 outputs.append([data['channel'],
                                 "!newgame !joingame !startgame !endgame "
                                 "!listplayers !guess !clue !pass !score "
-                                "!print !help"])
+                                "!print !help http://czechgames.com/files/rules/codenames-rules-en.pdf"])
 
             if command == '!spymaster':
                 GAMES.print_spymaster_card(data)
