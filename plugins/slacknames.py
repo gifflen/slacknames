@@ -287,27 +287,29 @@ class Game(object):
             return
 
         #self.fake_players()
-        if len(self.players) >= 4:
-            self._init_play_area()
-            self._select_teams()
-            self._select_spymasters()
-            self.spymaster_card = SpyMasterCard(self.teams)
-            self.started = True
-            self.current_team = self.spymaster_card.first_team
-            self.clue_given = False
-
-            self._message_slack("Game Started!")
-            self.print_players()
-            self.print_game()
-
-            self._message_slack(
-                'It is {}\'s turn. {} please submit a !clue'.format(
-                    self.current_team.color, self.current_team.spymaster))
-            self.spymaster()
-
-        else:
+        if len(self.players) <4:
             self._message_slack("Four players required to start. {}/4 signed up.".format(len(self.players)))
-            print "Not enough players"
+            return
+
+        self._init_play_area()
+        self._select_teams()
+        self._select_spymasters()
+        self.spymaster_card = SpyMasterCard(self.teams)
+        self.started = True
+        self.current_team = self.spymaster_card.first_team
+        self.clue_given = False
+
+        self._message_slack("Game Started! Rules available here: http://czechgames.com/files/rules/codenames-rules-en.pdf")
+        self.print_players()
+        self.print_game()
+
+        self._message_slack(
+            'It is {}\'s turn. {} please submit a !clue'.format(
+                self.current_team.color, self.current_team.spymaster))
+        self.spymaster()
+
+
+
 
     def _change_teams(self):
         self.remaining_guesses = 0
