@@ -73,8 +73,7 @@ class RtmBot(object):
                     channel.send_message("{}".format(message))
                     limiter = True
                 else:
-                    response = json.loads(
-                        self.slack_client.api_call('im.open', user=output[0]))
+                    response = self.slack_client.api_call('im.open', user=output[0])
                     dm_id = response['channel']['id']
                     channel = self.slack_client.server.channels.find(dm_id)
                     if limiter == True:
