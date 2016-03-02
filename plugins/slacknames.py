@@ -1,5 +1,4 @@
 import copy
-import json
 import logging
 import os
 import random
@@ -137,8 +136,8 @@ class SpyMasterCard(object):
         # 8 second player
 
         self._populate_words("kill", 1)
-        self._populate_words(self.first_team, 9)
-        self._populate_words(self.second_team, 8)
+        self._populate_words(self.first_team.color, 9)
+        self._populate_words(self.second_team.color, 8)
 
     def check_guess(self, row, column):
         return self.grid[row][column]
@@ -153,13 +152,16 @@ class User(object):
         self._info = {}
         self._refresh_info()
         self._get_name()
-        self._get_channel()
 
     def __repr__(self):
         return self.name
 
     def _refresh_info(self):
-        response = json.loads(CLIENT.api_call("users.info", user=self.slack_id))
+        response = CLIENT.api_call("users.info", user=self.slack_id)
+
+        log.debug(response)
+        #response = json.loads(response)
+
         self._info = response['user']
 
     def _get_name(self):
@@ -169,14 +171,11 @@ class User(object):
             log.warn('No name found in slack response')
             self.name = ''
 
-    def _get_channel(self):
-        pass
-
-    def _create_dm_channel(self):
-        pass
-
     def dm_user(self, message):
         outputs.append([self.slack_id, message])
+
+    def __eq__(self, other):
+        return self.slack_id == other
 
 
 class Team(object):
@@ -205,7 +204,7 @@ class Team(object):
         return self.score
 
     def select_spymaster(self):
-        self.spymaster(random.choice(list(self.players)))
+        self.spymaster = random.choice(list(self.players))
         return self.spymaster
 
     def print_players(self):
@@ -287,7 +286,7 @@ class Game(object):
             self._message_slack("Game has already started.")
             return
 
-        self.fake_players()
+        #self.fake_players()
         if len(self.players) >= 4:
             self._init_play_area()
             self._select_teams()
@@ -302,18 +301,13 @@ class Game(object):
             self.print_game()
 
             self._message_slack(
-                'It is {}\'s turn. @{} please submit a !clue'.format(
-                    self.current_team, self.current_team.spymaster))
+                'It is {}\'s turn. {} please submit a !clue'.format(
+                    self.current_team.color, self.current_team.spymaster))
             self.spymaster()
 
         else:
-            self._message_slack("Not enough players to start")
+            self._message_slack("Four players required to start. {}/4 signed up.".format(len(self.players)))
             print "Not enough players"
-
-    def fake_players(self):
-        self.join_game('U0C2J3MQV')
-        self.join_game('U0C2J3MQV')
-        self.join_game('U0C2J3MQV')
 
     def _change_teams(self):
         self.remaining_guesses = 0
@@ -325,18 +319,38 @@ class Game(object):
 
         self._message_slack("Current team is {}".format(self.current_team.color))
 
-    def _check_team(self, player):
-        # if player in self.current_team
-        pass
+    def _user_is_playing(self, player):
+        log.debug(player)
+        for user in self.players:
+            if user == player:
+                return True
+        return False
 
-    def guess(self, guess, user_id):
+    def _user_is_on_current_team(self, player):
+        for user in self.current_team.players:
+            if user == player:
+                return True
+        return False
+
+    def _user_is_spymaster(self, player):
+        return self.current_team.spymaster == player
+
+    def guess(self, guess, player):
+        if not self._user_is_playing(player):
+            self._message_slack("Sorry, you don't belong to any teams. Please !joingame")
+            return
+        if not self._user_is_on_current_team(player):
+            self._message_slack("You are not on the current team. You are not allowed to guess.")
+            return
+        if self._user_is_spymaster(player):
+            self._message_slack("You are a spymaster. You are not allowed to guess.")
+            return
+
         if not self.clue_given:
             self._message_slack(
-                "Please wait for your spymaster to give a clue")
+                "Please wait for your {} to give a clue".format(
+                    self.current_team.spymaster))
             return
-        # TODO: check player against current team
-        # TODO: check reminaing guesses
-        # TODO: check if spymaster
 
         guess = guess.lower()
 
@@ -409,13 +423,26 @@ class Game(object):
         self._message_slack("Changing teams")
         self._change_teams()
 
-    # TODO: Need to determine who the clue is coming from
-    def clue(self, clue, count):
-        # todo: check spymaster
-        # todo: check turn
+    def clue(self, player, clue, count):
+        if not self._user_is_playing(player):
+            self._message_slack("Sorry, you don't belong to any teams. Please !joingame")
+            return
+        if not self._user_is_spymaster(player):
+            self._message_slack("You are not the current team's spymaster")
+            return
+        if not self._user_is_on_current_team(player):
+            self._message_slack("You are not on the current team")
+            return
         if self.clue_given:
             self._message_slack("Clue has already been submitted this round")
             return
+
+        try:
+            self.remaining_guesses = int(count) + 1
+        except ValueError:
+            self._message_slack("The number accompanying your clue must be an integer. Please try again {}".format(self.current_team.spymaster.name))
+            return
+
         self.current_team.add_clue(clue)
         self.clue_given = True
         self.remaining_guesses = int(count) + 1
@@ -497,7 +524,8 @@ class Games(object):
 
     def clue(self, data, clue, count):
         game = self.find_game_by_name(get_channel_name(data))
-        game.clue(clue, count)
+        user = User(extract_user_id(data))
+        game.clue(user, clue, count)
 
     def print_spymaster_card(self, data):
         game = self.find_game_by_name(get_channel_name(data))
