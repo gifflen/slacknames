@@ -112,7 +112,8 @@ class SpyMasterCard(object):
         self.second_team = teams[0]
 
     def _populate_words(self, word, count):
-        for key in random.sample(self.grid, count):
+        blanks = [key for key in self.grid if not self.grid[key]]
+        for key in random.sample(blanks, count):
             self.grid[key] = word
 
     def _fill_bystanders(self):
