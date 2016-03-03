@@ -33,10 +33,11 @@ TEXT_ANCHOR = None
 TEXT_SPACING = 0
 
 # Other various grid variables
-GRID_SIZE = 5
-GRID_UNIT = IMAGE_SIZE[0] / GRID_SIZE
+GRID_ROWS = 5
+GRID_COLS = 5
+
+GRID_UNIT = IMAGE_SIZE[0] / GRID_ROWS
 GRID_TEXT_OFFSET = GRID_UNIT * .25
-ALPHABET = ("A", "B", "C", "D", "E")
 
 
 def draw_image(grid):
@@ -47,21 +48,22 @@ def draw_image(grid):
     draw = ImageDraw.Draw(image)
 
     # Iterate over the words and draw the text on the grid
-    for i in range(GRID_SIZE):
-        for j in range(GRID_SIZE):
-            text_fill = None
-            x = (GRID_UNIT * (i + 1)) - GRID_UNIT + GRID_TEXT_OFFSET
-            y = (GRID_UNIT * (j + 1)) - GRID_UNIT + GRID_TEXT_OFFSET
-            text = grid[str(i + 1)][ALPHABET[j]]
+    for key in grid:
+        i = key[0]
+        j = key[1]
+        text_fill = None
+        x = (GRID_UNIT * (i + 1)) - GRID_UNIT + GRID_TEXT_OFFSET
+        y = (GRID_UNIT * (j + 1)) - GRID_UNIT + GRID_TEXT_OFFSET
+        text = grid[key]
 
-            if text.lower() == 'red':
-                text_fill = (255, 0, 0, 255)
-            if text.lower() == 'blue':
-                text_fill = (0, 0, 255, 255)
+        if text.lower() == 'red':
+            text_fill = (255, 0, 0, 255)
+        if text.lower() == 'blue':
+            text_fill = (0, 0, 255, 255)
 
-            draw.multiline_text((x, y), text, text_fill, TEXT_FONT,
-                                TEXT_ANCHOR,
-                                TEXT_SPACING, TEXT_ALIGN)
+        draw.multiline_text((x, y), text, text_fill, TEXT_FONT,
+                            TEXT_ANCHOR,
+                            TEXT_SPACING, TEXT_ALIGN)
 
     # Done with `draw` object
     del draw
@@ -92,11 +94,11 @@ class SpyMasterCard(object):
     def __init__(self, teams):
         self.teams = teams
         self.first_team = teams[0]
-        self.grid = {'1': {'A': '', 'B': '', 'C': '', 'D': '', 'E': ''},
-                     '2': {'A': '', 'B': '', 'C': '', 'D': '', 'E': ''},
-                     '3': {'A': '', 'B': '', 'C': '', 'D': '', 'E': ''},
-                     '4': {'A': '', 'B': '', 'C': '', 'D': '', 'E': ''},
-                     '5': {'A': '', 'B': '', 'C': '', 'D': '', 'E': ''}}
+        self.grid = {}
+
+        for x in range(GRID_COLS):
+            for y in range(GRID_ROWS):
+                self.grid[x, y] = ''
 
         self._choose_player_orders()
         self._populate_grid()
@@ -109,26 +111,14 @@ class SpyMasterCard(object):
         self.first_team = first_team
         self.second_team = teams[0]
 
-    # This is ugly but works.
     def _populate_words(self, word, count):
-        if count == 0:
-            return
-        rows = self.grid.keys()
-        columns = self.grid['1'].keys()
-
-        row = random.choice(rows)
-        column = random.choice(columns)
-        if not self.grid[row][column]:
-            self.grid[row][column] = word
-            self._populate_words(word, count - 1)
-        else:
-            self._populate_words(word, count)
+        for key in random.sample(self.grid, count):
+            self.grid[key] = word
 
     def _fill_bystanders(self):
-        for key in self.grid.keys():
-            for sub_key in self.grid[key].keys():
-                if self.grid[key][sub_key] == '':
-                    self.grid[key][sub_key] = 'brown'
+        bystanders = [key for key in self.grid if not self.grid[key]]
+        for key in bystanders:
+            self.grid[key] = 'brown'
 
     def _populate_grid(self):
         # 1 kill word
@@ -139,8 +129,8 @@ class SpyMasterCard(object):
         self._populate_words(self.first_team.color, 9)
         self._populate_words(self.second_team.color, 8)
 
-    def check_guess(self, row, column):
-        return self.grid[row][column]
+    def check_guess(self, col, row):
+        return self.grid[col, row]
 
 
 class User(object):
@@ -225,11 +215,12 @@ class Game(object):
         self.red_team = Team('Red')
         self.teams = [self.blue_team, self.red_team]
         self.channel = channel
-        self.play_area = {'1': {'A': '', 'B': '', 'C': '', 'D': '', 'E': ''},
-                          '2': {'A': '', 'B': '', 'C': '', 'D': '', 'E': ''},
-                          '3': {'A': '', 'B': '', 'C': '', 'D': '', 'E': ''},
-                          '4': {'A': '', 'B': '', 'C': '', 'D': '', 'E': ''},
-                          '5': {'A': '', 'B': '', 'C': '', 'D': '', 'E': ''}}
+        self.play_area = {}
+
+        for x in range(GRID_COLS):
+            for y in range(GRID_ROWS):
+                self.play_area[x, y] = ''
+
         self.started = False
         self.spymaster_card = None
         self.current_team = self.red_team
@@ -242,15 +233,12 @@ class Game(object):
 
     def _init_play_area(self):
         log.debug('Initing Play area')
-        word_bank = list(WORDS)
+        word_bank = random.sample(WORDS, len(self.play_area))
 
-        for key in self.play_area.keys():
-            for sub_key in self.play_area[key].keys():
-                word = random.choice(word_bank)
-                word_bank.remove(word)
-                self.play_area[key][sub_key] = word
+        for key in self.play_area:
+            self.play_area[key] = word_bank.pop()
 
-        print self.play_area
+        print sorted(self.play_area.items())
 
     def _select_teams(self):
         log.debug('Selecting teams')
@@ -287,7 +275,7 @@ class Game(object):
             return
 
         #self.fake_players()
-        if len(self.players) <4:
+        if len(self.players) < 4:
             self._message_slack("Four players required to start. {}/4 signed up.".format(len(self.players)))
             return
 
@@ -307,9 +295,6 @@ class Game(object):
             'It is {}\'s turn. {} please submit a !clue'.format(
                 self.current_team.color, self.current_team.spymaster))
         self.spymaster()
-
-
-
 
     def _change_teams(self):
         self.remaining_guesses = 0
@@ -362,55 +347,57 @@ class Game(object):
             self._message_slack(
                 "{} is not a valid clue. Try again".format(guess))
             return
-        for row in self.play_area.keys():
-            for column in self.play_area[row].keys():
-                if self.play_area[row][column].lower() == guess:
-                    self.remaining_guesses -= 1
-                    guess_type = self.spymaster_card.check_guess(row, column)
-                    self.play_area[row][column] = guess_type
-                    logging.debug('Guess type: {}'.format(guess_type))
-                    if guess_type == 'kill':
-                        self._message_slack(
-                            "You've selected the kill word. GAME OVER")
-                        # TODO: implement game over
-                        return
 
-                    elif guess_type == '':
-                        self._message_slack(
-                            "You've selected a bystander. Changing Teams")
-                        self._change_teams()
-                        self.print_game()
-                        return
+        for key in self.play_area:
 
-                    elif guess_type != self.current_team:
-                        self.opposing_team.add_score()
-                        self._message_slack(
-                            "You've selected a opposing agent. Changing Teams")
-                        self._change_teams()
-                        self.print_game()
-                        return
-
-                    elif guess_type == self.current_team:
-                        self._message_slack(
-                            "You've selected an agent! Congrats!")
-                        self.current_team.add_score()
-                        self._message_slack(
-                            "{} has {} guesses remaining.".format(
-                                self.current_team, self.remaining_guesses))
-                        self.print_game()
-                        return
-
-                    if self.remaining_guesses == 0:
-                        self._message_slack(
-                            "No Guesses remaining. Changing Teams")
-                        self._change_teams()
-                        self.print_game()
-                        return
-
+            if self.play_area[key].lower() == guess:
+                self.remaining_guesses -= 1
+                guess_type = self.spymaster_card.check_guess(*key)
+                self.play_area[key] = guess_type
+                logging.debug('Guess type: {}'.format(guess_type))
+                if guess_type == 'kill':
                     self._message_slack(
-                        "{} Guesses remaining. Please select another agent "
-                        "or !pass".format(self.remaining_guesses))
+                        "You've selected the kill word. GAME OVER")
+                    # TODO: implement game over
                     return
+
+                elif guess_type == '':
+                    self._message_slack(
+                        "You've selected a bystander. Changing Teams")
+                    self._change_teams()
+                    self.print_game()
+                    return
+
+                elif guess_type != self.current_team:
+                    self.opposing_team.add_score()
+                    self._message_slack(
+                        "You've selected a opposing agent. Changing Teams")
+                    self._change_teams()
+                    self.print_game()
+                    return
+
+                elif guess_type == self.current_team:
+                    self._message_slack(
+                        "You've selected an agent! Congrats!")
+                    self.current_team.add_score()
+                    self._message_slack(
+                        "{} has {} guesses remaining.".format(
+                            self.current_team, self.remaining_guesses))
+                    self.print_game()
+                    return
+
+                if self.remaining_guesses == 0:
+                    self._message_slack(
+                        "No Guesses remaining. Changing Teams")
+                    self._change_teams()
+                    self.print_game()
+                    return
+
+                self._message_slack(
+                    "{} Guesses remaining. Please select another agent "
+                    "or !pass".format(self.remaining_guesses))
+
+                return
         self._message_slack(
             "\"{}\" is not a valid clue. Try again".format(guess))
 
